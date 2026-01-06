@@ -1,79 +1,170 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="utf-8">
-    <title>Template</title>
-</head>
-<body>
-    <div id="TemplateConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-select,emby-checkbox">
-        <div data-role="content">
-            <div class="content-primary">
-                <form id="TemplateConfigForm">
-                    <div class="selectContainer">
-                        <label class="selectLabel" for="Options">Several Options</label>
-                        <select is="emby-select" id="Options" name="Options" class="emby-select-withcolor emby-select">
-                            <option id="optOneOption" value="OneOption">One Option</option>
-                            <option id="optAnotherOption" value="AnotherOption">Another Option</option>
-                        </select>
-                    </div>
-                    <div class="inputContainer">
-                        <label class="inputLabel inputLabelUnfocused" for="AnInteger">An Integer</label>
-                        <input id="AnInteger" name="AnInteger" type="number" is="emby-input" min="0" />
-                        <div class="fieldDescription">A Description</div>
-                    </div>
-                    <div class="checkboxContainer checkboxContainer-withDescription">
-                        <label class="emby-checkbox-label">
-                            <input id="TrueFalseSetting" name="TrueFalseCheckBox" type="checkbox" is="emby-checkbox" />
-                            <span>A Checkbox</span>
-                        </label>
-                    </div>
-                    <div class="inputContainer">
-                        <label class="inputLabel inputLabelUnfocused" for="AString">A String</label>
-                        <input id="AString" name="AString" type="text" is="emby-input" />
-                        <div class="fieldDescription">Another Description</div>
-                    </div>
-                    <div>
-                        <button is="emby-button" type="submit" class="raised button-submit block emby-button">
-                            <span>Save</span>
-                        </button>
-                    </div>
-                </form>
+<div id="UserPasswordResetPage" data-role="page" class="page type-interior pluginConfigurationPage">
+    <div data-role="content">
+        <div class="content-primary">
+            
+            <div class="verticalSection">
+                <div class="sectionTitleContainer">
+                    <h2 class="sectionTitle">User Password Reset (v0.8.1.1)</h2>
+                    <p>Select a user to reset their password via Jellyfin Admin API.</p>
+                </div>
+
+                <table class="tblUsers detailTable" style="width: 100%; text-align: left;">
+                    <thead>
+                        <tr style="border-bottom: 1px solid #444;">
+                            <th style="padding: 10px;">Avatar</th>
+                            <th style="padding: 10px;">User</th>
+                            <th style="padding: 10px;">Status</th>
+                            <th style="padding: 10px;">Action</th>
+                            <th style="padding: 10px;">Result</th>
+                        </tr>
+                    </thead>
+                    <tbody id="UsersTableBody">
+                        <tr><td colspan="5" style="padding: 20px;">Loading users...</td></tr>
+                    </tbody>
+                </table>
             </div>
         </div>
-        <script type="text/javascript">
-            var TemplateConfig = {
-                pluginUniqueId: 'eb5d7894-8eef-4b36-aa6f-5d124e828ce1'
-            };
-
-            document.querySelector('#TemplateConfigPage')
-                .addEventListener('pageshow', function() {
-                    Dashboard.showLoadingMsg();
-                    ApiClient.getPluginConfiguration(TemplateConfig.pluginUniqueId).then(function (config) {
-                        document.querySelector('#Options').value = config.Options;
-                        document.querySelector('#AnInteger').value = config.AnInteger;
-                        document.querySelector('#TrueFalseSetting').checked = config.TrueFalseSetting;
-                        document.querySelector('#AString').value = config.AString;
-                        Dashboard.hideLoadingMsg();
-                    });
-                });
-
-            document.querySelector('#TemplateConfigForm')
-                .addEventListener('submit', function(e) {
-                Dashboard.showLoadingMsg();
-                ApiClient.getPluginConfiguration(TemplateConfig.pluginUniqueId).then(function (config) {
-                    config.Options = document.querySelector('#Options').value;
-                    config.AnInteger = document.querySelector('#AnInteger').value;
-                    config.TrueFalseSetting = document.querySelector('#TrueFalseSetting').checked;
-                    config.AString = document.querySelector('#AString').value;
-                    ApiClient.updatePluginConfiguration(TemplateConfig.pluginUniqueId, config).then(function (result) {
-                        Dashboard.processPluginConfigurationUpdateResult(result);
-                    });
-                });
-
-                e.preventDefault();
-                return false;
-            });
-        </script>
     </div>
-</body>
-</html>
+
+    <script type="text/javascript">
+        (function() {
+            // v0.8.1.1: Avatars restored + Old API Logic
+            
+            function generatePassword() {
+                var chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+                var pw = '';
+                for (var i = 0; i < 12; i++) {
+                    pw += chars.charAt(Math.floor(Math.random() * chars.length));
+                }
+                return pw;
+            }
+            
+            function getApiClient() {
+                return window.ApiClient || (window.Dashboard && window.Dashboard.ApiClient);
+            }
+
+            function copyToClipboard(text) {
+                if (navigator.clipboard && window.isSecureContext) {
+                    return navigator.clipboard.writeText(text);
+                }
+                return new Promise(function(resolve, reject) {
+                    try {
+                        var textArea = document.createElement("textarea");
+                        textArea.value = text;
+                        textArea.style.position = "fixed";
+                        textArea.style.left = "0";
+                        textArea.style.top = "0";
+                        textArea.style.opacity = "0";
+                        document.body.appendChild(textArea);
+                        textArea.focus();
+                        textArea.select();
+                        var successful = document.execCommand('copy');
+                        document.body.removeChild(textArea);
+                        if (successful) resolve(); else reject("Browser blocked copy");
+                    } catch (err) { reject(err); }
+                });
+            }
+
+            function renderUsers(users, apiClient) {
+                var html = '';
+                var list = (users && users.Items) ? users.Items : (Array.isArray(users) ? users : []);
+
+                list.forEach(function(user) {
+                    // AVATAR LOGIK
+                    var hasImage = user.PrimaryImageTag ? true : false;
+                    var imgUrl = hasImage 
+                        ? apiClient.getUrl('Users/' + user.Id + '/Images/Primary?Height=80') 
+                        : '';
+                    
+                    var avatarHtml = hasImage 
+                        ? '<img src="' + imgUrl + '" style="width:40px; height:40px; border-radius:50%; object-fit: cover;">' 
+                        : '<div style="width:40px; height:40px; border-radius:50%; background:#555; display:flex; align-items:center; justify-content:center; font-weight:bold; color: #fff; font-size: 1.2em;">' + user.Name.charAt(0).toUpperCase() + '</div>';
+
+                    // BADGE LOGIK
+                    var badgeStyle = "padding: 2px 6px; border-radius: 4px; font-size: 0.8em; color: white; font-weight: bold;";
+                    var adminBadge = user.Policy.IsAdministrator 
+                        ? '<span style="' + badgeStyle + ' background: #cc0000;">Admin</span>' 
+                        : '<span style="' + badgeStyle + ' background: #e67e22;">User</span>';
+
+                    html += '<tr style="border-bottom: 1px solid #333;">';
+                    html += '<td style="padding: 10px;">' + avatarHtml + '</td>';
+                    html += '<td style="padding: 10px; font-weight:bold; vertical-align: middle;">' + user.Name + '</td>';
+                    html += '<td style="padding: 10px; vertical-align: middle;">' + adminBadge + '</td>';
+                    html += '<td style="padding: 10px; vertical-align: middle;">';
+                    html += '<button type="button" class="raised btnReset" data-userid="' + user.Id + '" style="background:#00a4dc; color:white; padding:5px 15px; border:none; cursor:pointer; border-radius:4px;">Reset PW</button>';
+                    html += '</td>';
+                    html += '<td style="padding: 10px; vertical-align: middle;">';
+                    html += '  <span id="res-' + user.Id + '" style="font-family:monospace; color:#0f0; margin-right:10px; font-weight:bold;"></span>';
+                    html += '  <button type="button" class="btnCopy" data-userid="' + user.Id + '" style="display:none; padding:2px 8px; cursor:pointer; background:#444; color:#fff; border:1px solid #666;">Copy</button>';
+                    html += '</td>';
+                    html += '</tr>';
+                });
+                
+                var tbody = document.getElementById('UsersTableBody');
+                if(tbody) {
+                    tbody.innerHTML = html;
+                    tbody.querySelectorAll('.btnReset').forEach(btn => btn.addEventListener('click', function() { doReset(this.getAttribute('data-userid')); }));
+                    tbody.querySelectorAll('.btnCopy').forEach(btn => btn.addEventListener('click', function() { doCopy(this.getAttribute('data-userid')); }));
+                }
+            }
+
+            function doCopy(userId) {
+                var span = document.getElementById('res-' + userId);
+                if(span) {
+                    copyToClipboard(span.textContent).then(function() {
+                         var btn = document.querySelector('button.btnCopy[data-userid="' + userId + '"]');
+                         if(btn) {
+                             var old = btn.textContent;
+                             btn.textContent = "OK!";
+                             setTimeout(function(){ btn.textContent = old; }, 1500);
+                         }
+                    }).catch(function(err) { alert("Copy failed: " + err); });
+                }
+            }
+
+            function doReset(userId) {
+                var apiClient = getApiClient();
+                if (!apiClient) return;
+
+                var newPw = generatePassword();
+                var span = document.getElementById('res-' + userId);
+                if(span) span.textContent = "Saving...";
+
+                apiClient.ajax({
+                    type: 'POST',
+                    url: apiClient.getUrl('Users/' + userId + '/Password'),
+                    data: JSON.stringify({
+                        NewPw: newPw,
+                        ResetPassword: false 
+                    }),
+                    contentType: 'application/json'
+                }).then(function() {
+                    span.textContent = newPw;
+                    var btnC = document.querySelector('button.btnCopy[data-userid="' + userId + '"]');
+                    if(btnC) btnC.style.display = 'inline-block';
+                    copyToClipboard(newPw).catch(function(){});
+                }).catch(function(err) {
+                    var msg = "Error";
+                    if (err && err.status) msg += " " + err.status;
+                    alert("Reset Failed: " + (err.message || msg));
+                    if(span) span.textContent = "Error";
+                });
+            }
+
+            function init() {
+                var client = getApiClient();
+                if(client) client.getUsers().then(function(res) { renderUsers(res, client); });
+            }
+
+            document.addEventListener('viewshow', function(e) {
+                var p = e.detail.page || e.target;
+                if(p.id === 'UserPasswordResetPage' || p.querySelector('#UserPasswordResetPage')) init();
+            });
+            
+            var intv = setInterval(function() {
+                if(document.getElementById('UsersTableBody') && getApiClient()) { clearInterval(intv); init(); }
+            }, 500);
+
+        })();
+    </script>
+</div>
